@@ -20,7 +20,9 @@ end
 """
     packing_summary(particles, domain) -> named tuple
 
-Bed height is the highest point on a sphere. The apparent packing fraction
+Bed height is the highest point on a sphere. `surface_height` is the median
+of the local top, measured on patches two median diameters wide, which is the
+layer thickness a height measurement sees. The apparent packing fraction
 divides the sphere volume by `Lx * Ly * height`, so the free surface makes it
 lower than a bulk measurement. Coordination counts periodic contacts.
 """
@@ -34,10 +36,33 @@ function packing_summary(particles::Particles, domain::Domain)
     packing = volume / (domain.Lx * domain.Ly * height)
     return (;
         height = height * u"m",
+        surface_height = surface_height(host, domain) * u"m",
         apparent_packing = packing,
         mean_coordination = mean_coordination(host, domain),
         n = nparticles(host),
     )
+end
+
+"""Median of the highest sphere top in each patch of two median diameters."""
+function surface_height(host::Particles, domain::Domain)
+    n = nparticles(host)
+    n > 0 || return 0.0
+    cell = 4 * median_value(host.radius)
+    nx = max(1, ceil(Int, domain.Lx / cell))
+    ny = max(1, ceil(Int, domain.Ly / cell))
+    surf = fill(0.0, nx * ny)
+    filled = fill(false, nx * ny)
+    for i in 1:n
+        ix = clamp(floor(Int, host.x[i] / cell) + 1, 1, nx)
+        iy = clamp(floor(Int, host.y[i] / cell) + 1, 1, ny)
+        c = ix + (iy - 1) * nx
+        top = host.z[i] + host.radius[i]
+        if !filled[c] || top > surf[c]
+            surf[c] = top
+            filled[c] = true
+        end
+    end
+    return median_value(surf[filled])
 end
 
 function mean_coordination(host::Particles, domain::Domain)

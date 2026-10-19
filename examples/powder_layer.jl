@@ -32,7 +32,7 @@ simulate_powder_layer(;
     layer_height,
     Lx, Ly,
     substrate_thickness = 200u"μm",
-    voxels_per_diameter=12,
+    voxels_per_diameter=6,
     stl = joinpath(outdir, "powder_bed.stl"),
     csv = joinpath(outdir, "particles.csv"),
     h5 = joinpath(outdir, "powder_bed.h5"),

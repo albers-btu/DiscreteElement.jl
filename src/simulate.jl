@@ -67,9 +67,11 @@ end
     run_dem!(bed; max_time, min_time=0, max_steps, stop_speed=0, check_every=100,
              energy_cap=Inf, verbose=false)
 
-Semi-implicit Euler steps until `max_time`, `max_steps`, or the
-mass-weighted root-mean-square speed (translation plus rotation) drops below
-`stop_speed` after `min_time`. `stop_speed <= 0` disables the early exit.
+Semi-implicit Euler steps until `max_time`, `max_steps`, or, after
+`min_time`, both the mass-weighted root-mean-square speed (translation plus
+rotation) and the fastest particle's translational speed drop below
+`stop_speed`. The second check keeps a quiet bed from being saved while a few
+spheres are still in the air. `stop_speed <= 0` disables the early exit.
 Kinetic energy above `energy_cap` aborts the run as unstable.
 
 Times are seconds, speeds are `m/s`, and `energy_cap` is joules. Unitful
@@ -111,10 +113,11 @@ function run_dem!(
             KE = kinetic_energy!(ke, p)
             zmax = maximum(p.z)
             speed = sqrt(2 * max(KE, zero(T)) / mass_sum)
+            vmax = maximum(hypot.(p.vx, p.vy, p.vz))
             if verbose
                 @printf(
-                    "step %7d   t = %.4e s   speed = %.4e m/s   zmax = %.4e m\n",
-                    step, t, speed, zmax,
+                    "step %7d   t = %.4e s   speed = %.4e m/s   vmax = %.4e m/s   zmax = %.4e m\n",
+                    step, t, speed, vmax, zmax,
                 )
             end
             if !isfinite(KE) || !isfinite(zmax)
@@ -135,7 +138,7 @@ function run_dem!(
                     "Lower dt_factor.",
                 )
             end
-            if stop_speed > 0 && t >= T(min_time) && speed < T(stop_speed)
+            if stop_speed > 0 && t >= T(min_time) && speed < T(stop_speed) && vmax < T(stop_speed)
                 settled = true
                 break
             end
@@ -229,7 +232,10 @@ function simulate_powder_layer(;
         placed.radii, material;
         drop_height = placed.z_top, overlap_fraction, dt_factor,
     )
-    z1 = placed.z_cloud + maximum(placed.radii)
+    rmax = maximum(placed.radii)
+    # Centers are spawned below z_cloud. Another cloud height, plus two
+    # diameters, keeps a bounce inside the cell list.
+    z1 = placed.z_cloud + max(placed.z_cloud, 8 * rmax) + 4 * rmax
     bed = assemble_bed(
         particles, domain, material;
         kn, dt, z0 = 0.0, z1, max_per_cell,
@@ -266,10 +272,11 @@ function simulate_powder_layer(;
     )
     if verbose
         @printf(
-            "Settled        steps = %d   t = %.4e s   speed = %.4e m/s   height = %.4e m   packing = %.3f\n",
+            "Settled        steps = %d   t = %.4e s   speed = %.4e m/s   surface = %.4e m   highest = %.4e m   packing = %.3f\n",
             run.steps,
             as_si(run.time, u"s"),
             sqrt(2 * as_si(run.kinetic_energy, u"J") / sum(bed.particles.mass)),
+            as_si(summary.surface_height, u"m"),
             as_si(summary.height, u"m"),
             summary.apparent_packing,
         )
