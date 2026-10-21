@@ -1,22 +1,31 @@
-# Single-track LPBF powder strip.
-#
-#   julia --project=. examples/Prathmesh_PowderBed.jl
-#   julia --project=. examples/Prathmesh_PowderBed.jl 800
-#
-# x is the track direction, 1.5 mm. y is 0.5 mm, a few melt-pool
-# widths, so one track has powder on both sides. The particle count is
-# chosen so the settled free surface is about 50 µm. Pass a count to override.
-#
-# D10 = 25 µm and D90 = 35 µm. D50 is their geometric mean, so the lognormal
-# is symmetric. Cutoffs are 20 µm and 45 µm, about three standard deviations
-# out. The build plate is 200 µm, as in examples/powder_layer.jl.
-# Lengths use Unitful. The CSV, STL, and HDF5 file are written in meters.
-
 using DiscreteElement
 using Unitful: ustrip
 
+
+using DiscreteElement
+using Dates
+using Random
+using Unitful: ustrip
+using StaticArrays
+using CUDA
+
+using CairoMakie
+using GLMakie
+
+timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
+outdir = joinpath(
+    dirname(@__DIR__), 
+    "output", 
+    "Pratmesh_PowderBed_" * timestamp)
+mkpath(outdir)
+
 Lx = 1.5u"mm"
 Ly = 0.5u"mm"
+Lz = 0.5u"mm"
+domain = SVector(
+    ustrip(u"m", Lx),
+    ustrip(u"m", Ly),
+    ustrip(u"m", Lz))
 
 d10 = 25u"μm"
 d90 = 35u"μm"
@@ -24,31 +33,87 @@ d50 = sqrt(d10 * d90)
 dmin = 20u"μm"
 dmax = 45u"μm"
 layer_height = 50u"μm"
-# Solid fraction of a 50 µm slab. At 0.50 the free surface settles near 54 µm.
-# 0.421 settles that surface at about 51 µm, the experimental layer thickness.
-packing = 0.421
 
-if length(ARGS) >= 1
-    n = parse(Int, ARGS[1])
-else
-    probe_n = 4000
-    probe = sample_lognormal_radii(probe_n, d10, d50, d90; dmin, dmax)
-    side = suggest_lateral_size(probe, layer_height; packing)
-    n = round(Int, probe_n * ustrip(u"m^2", Lx * Ly) / ustrip(u"m^2", side * side))
-end
+n_particles = 30_000
 
-outdir = joinpath(@__DIR__, "output", "Prathmesh_PowderBed")
-mkpath(outdir)
+radii = sample_lognormal_radii(n_particles, d10, d50, d90; dmin, dmax, rng=Xoshiro(1))
 
-simulate_powder_layer(;
-    n,
-    d10, d50, d90, dmin, dmax,
-    layer_height,
-    Lx, Ly,
-    packing_guess = packing,
-    substrate_thickness = 200u"μm",
-    voxels_per_diameter = 6,
-    stl = joinpath(outdir, "powder_bed.stl"),
-    csv = joinpath(outdir, "particles.csv"),
-    h5 = joinpath(outdir, "powder_bed.h5"),
+n_particles = estimate_n_particles(
+    radii,
+    domain,
+    layer_height;
+    packing = 0.58,
 )
+
+radii = sample_lognormal_radii(n_particles, d10, d50, d90; dmin, dmax, rng=Xoshiro(1))
+
+CairoMakie.activate!()
+fig_hist = Figure();
+ax = Axis(fig_hist[1, 1], xlabel="Diameter (µm)", ylabel="Frequency (%)", title="Histogram")
+hist!(ax, ustrip.(u"µm", 2*radii), normalization=:probability)
+ax.xtickformat = values -> ["$(v) µm" for v in values]
+ax.ytickformat = values -> ["$(round(100 * v, digits=1))%" for v in values]
+save(joinpath(outdir, "powder_distribution.png"), fig_hist)
+
+
+result = mp4(
+    Float32.(ustrip.(u"m", radii)),
+    Float32.(domain); 
+    name = joinpath(outdir, "prathmesh.mp4"),
+    frame_every = 500,
+    fps = 24,
+    n_steps = 80_000,
+    min_speed = 1e-2,
+    check_every = 1_000,
+    min_speed_checks = 10,
+    min_steps = 5_000,
+    backend = CUDABackend(),
+)
+particles = result.particles
+
+#particles = simulate_n_particles(
+#    n_particles, 
+#    Float32.(ustrip.(u"m", radii)),
+#    Float32.(domain); 
+#    backend = CUDABackend(),
+#    n_steps = 80_000,
+#    min_speed = 1e-2,
+#    check_every = 1_000,
+#    min_speed_checks = 10,
+#    min_steps = 5_000
+#)
+
+particles = cut_powder_layer(
+    particles,
+    layer_height
+)
+
+hdf5_result = hdf5(
+    particles, 
+    domain; 
+    name = joinpath(outdir, "prathmesh.h5"),
+    cell_size = 5u"µm"
+)
+
+@show hdf5_result.dx
+@show hdf5_result.dy
+@show hdf5_result.dz
+
+stl(
+    particles,
+    domain;
+    name = joinpath(outdir, "prathmesh.stl"),
+    cell_size = 5u"µm"
+)
+
+x = Array(particles.x)
+y = Array(particles.y)
+z = Array(particles.z)
+
+GLMakie.activate!()
+pts = [Point3f(x[i], y[i], z[i]) for i in eachindex(particles)]
+fig3d = Figure()
+ax = Axis3(fig3d[1, 1], aspect = :data)
+meshscatter!(ax, pts, markersize=ustrip.(u"m", radii))
+
+wait(display(fig3d))

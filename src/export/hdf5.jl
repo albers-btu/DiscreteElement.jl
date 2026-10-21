@@ -1,8 +1,3 @@
-# Metal volume fraction on a Cartesian grid, and the HDF5 layout expected by
-# LatticeBoltzmann.jl. Lengths in this file are metres. `phi[x, y, z]` is the
-# fraction of cell (x, y, z); the plate is a separate mask and is not added
-# into `phi`.
-
 const _GL64_X, _GL64_W = let
     n = 32
     x = zeros(n)
@@ -31,16 +26,11 @@ const _GL64_X, _GL64_W = let
     x, w
 end
 
-"""Antiderivative of `sqrt(rad^2 - x^2)`."""
 function _circle_primitive(rad, x)
     s = sqrt(max(rad * rad - x * x, 0))
     return 0.5 * (x * s + rad * rad * asin(clamp(x / rad, -1, 1)))
 end
 
-"""
-Area of a disk of radius `rad` centred at the origin, cut by the rectangle
-`[x0, x1] × [y0, y1]`.
-"""
 function disk_rect_area(rad, x0, x1, y0, y1)
     rad <= 0 && return 0.0
     x0 = max(x0, -rad)
@@ -98,10 +88,6 @@ function disk_rect_area(rad, x0, x1, y0, y1)
     return max(area, 0)
 end
 
-"""
-Volume of the ball centred at `(cx, cy, cz)` inside the axis-aligned box.
-The slice area is exact; the remaining integral uses 32-point Gauss–Legendre.
-"""
 function sphere_aabb_volume(cx, cy, cz, radius, xmin, xmax, ymin, ymax, zmin, zmax)
     radius <= 0 && return 0.0
     (xmax <= xmin || ymax <= ymin || zmax <= zmin) && return 0.0
@@ -172,72 +158,6 @@ function sphere_aabb_volume(cx, cy, cz, radius, xmin, xmax, ymin, ymax, zmin, zm
     return clamp(volume, 0, min((4 / 3) * π * radius^3, box))
 end
 
-"""
-    metal_fraction_grid(particles, domain; voxels_per_diameter=6, substrate_thickness=0, dx=nothing)
-
-Cubic (or nearly cubic) raster of the powder. `phi[x,y,z]` is the metal volume
-fraction of that cell after summing sphere–cell intersections, including
-periodic images in x and y, then clamping to 1. Plate cells are marked in
-`substrate` and are left out of `phi`. `origin` is the minimum corner of cell
-`(1,1,1)`.
-"""
-function metal_fraction_grid(
-    particles::Particles,
-    domain::Domain;
-    voxels_per_diameter = 6,
-    substrate_thickness = 0,
-    dx = nothing,
-)
-    voxels_per_diameter = as_dimensionless(voxels_per_diameter)
-    voxels_per_diameter >= 2 ||
-        throw(ArgumentError("voxels_per_diameter must be at least 2"))
-    host = cpu_particles(particles)
-    n = nparticles(host)
-    n > 0 || throw(ArgumentError("particles must not be empty"))
-    d_med = 2 * median_value(host.radius)
-    target = dx === nothing ? d_med / voxels_per_diameter : as_si(dx, u"m")
-    target > 0 || throw(ArgumentError("dx must be positive"))
-    thickness = as_si(substrate_thickness, u"m")
-    thickness >= 0 || throw(ArgumentError("substrate_thickness must be non-negative"))
-
-    Nx = max(1, round(Int, domain.Lx / target))
-    dx_m = domain.Lx / Nx
-    Ny = max(1, round(Int, domain.Ly / dx_m))
-    dy_m = domain.Ly / Ny
-    dz_m = dx_m
-    z_hi = maximum(host.z .+ host.radius)
-    n_powder = max(1, ceil(Int, z_hi / dz_m - 1e-12))
-    n_sub = thickness > 0 ? max(1, round(Int, thickness / dz_m)) : 0
-    Nz = n_sub + n_powder
-    origin = (0.0, 0.0, -n_sub * dz_m)
-
-    phi = zeros(Float64, Nx, Ny, Nz)
-    cell = dx_m * dy_m * dz_m
-    plate = n_sub > 0
-    for i in 1:n
-        _accumulate_sphere!(
-            phi, host.x[i], host.y[i], host.z[i], host.radius[i],
-            origin, dx_m, dy_m, dz_m, domain.Lx, domain.Ly, cell, n_sub,
-        )
-    end
-    phi .= clamp.(phi, 0, 1)
-    substrate = nothing
-    if plate
-        substrate = zeros(UInt8, Nx, Ny, Nz)
-        substrate[:, :, 1:n_sub] .= UInt8(1)
-        phi[:, :, 1:n_sub] .= 0
-    end
-    return (;
-        phi,
-        substrate,
-        dx = dx_m,
-        dy = dy_m,
-        dz = dz_m,
-        origin,
-        substrate_thickness = n_sub * dz_m,
-    )
-end
-
 function _accumulate_sphere!(phi, cx, cy, cz, radius, origin, dx, dy, dz, Lx, Ly, cell, n_sub)
     Nx, Ny, Nz = size(phi)
     x_max = origin[1] + Nx * dx
@@ -276,13 +196,103 @@ function _accumulate_sphere!(phi, cx, cy, cz, radius, origin, dx, dy, dz, Lx, Ly
     return phi
 end
 
-"""
-    write_powder_bed(path, phi, dx, dy, dz, origin; substrate=nothing)
+function grid_cell_size(
+    domain::AbstractVector{<:Real},
+    resolution,
+)
+    length(domain) == 3 ||
+        throw(ArgumentError("domain must have three components"))
+    Lx, Ly, _ = Float64.(domain)
+    (Lx > 0 && Ly > 0) ||
+        throw(ArgumentError("domain sides must be positive"))
 
-Write one powder bed for LatticeBoltzmann.jl. `phi` is indexed `phi[x, y, z]`
-and is stored without transposition. Lengths are metres. `origin` is the
-minimum corner of cell `(1, 1, 1)`.
-"""
+    target = Float64(as_si(resolution, u"m"))
+    target > 0 || throw(ArgumentError("resolution must be positive"))
+
+    Nx = max(1, ceil(Int, Lx / target - 1e-12))
+    dx = Lx / Nx
+
+    Ny = max(1, ceil(Int, Ly / dx - 1e-12))
+    dy = Ly / Ny
+
+    return (;
+        cell_size = dx * u"m",
+        dx = dx * u"m",
+        dy = dy * u"m",
+        Nx,
+        Ny,
+    )
+end
+
+function metal_fraction_grid(
+    particles::ParticleArrays,
+    domain::AbstractVector{<:Real};
+    voxels_per_diameter::Real = 6,
+    substrate_thickness = 0,
+    cell_size = nothing,
+)
+    length(domain) == 3 || throw(ArgumentError("domain must have three components"))
+    n = length(particles)
+    n > 0 || throw(ArgumentError("particles must not be empty"))
+    x = Array(particles.x)
+    y = Array(particles.y)
+    z = Array(particles.z)
+    radius = Array(particles.radius)
+
+    Lx, Ly, Lz = Float64.(domain)
+    (Lx > 0 && Ly > 0 && Lz > 0) ||
+        throw(ArgumentError("domain sides must be positive"))
+
+    vpd = Float64(voxels_per_diameter)
+    vpd >= 2 || throw(ArgumentError("voxels_per_diameter must be at least 2"))
+    d_med = 2 * Float64(median(radius))
+    target = cell_size === nothing ? d_med / vpd :
+        Float64(as_si(cell_size, u"m"))
+    target > 0 || throw(ArgumentError("cell_size must be positive"))
+
+    thickness = substrate_thickness === nothing ? 0.0 :
+        Float64(as_si(substrate_thickness, u"m"))
+    thickness >= 0 ||
+        throw(ArgumentError("substrate_thickness must be non-negative"))
+
+    Nx = max(1, ceil(Int, Lx / target - 1e-12))
+    dx_m = Lx / Nx
+    Ny = max(1, ceil(Int, Ly / dx_m - 1e-12))
+    dy_m = Ly / Ny
+    dz_m = dx_m
+    z_hi = maximum(z .+ radius)
+    n_powder = max(1, ceil(Int, z_hi / dz_m - 1e-12))
+    n_sub = thickness > 0 ? max(1, round(Int, thickness / dz_m)) : 0
+    Nz = n_sub + n_powder
+    origin = (0.0, 0.0, -n_sub * dz_m)
+
+    phi = zeros(Float64, Nx, Ny, Nz)
+    cell = dx_m * dy_m * dz_m
+    for i in 1:n
+        _accumulate_sphere!(
+            phi, x[i], y[i], z[i], radius[i],
+            origin, dx_m, dy_m, dz_m, Lx, Ly, cell, n_sub,
+        )
+    end
+    phi .= clamp.(phi, 0, 1)
+
+    substrate = nothing
+    if n_sub > 0
+        substrate = zeros(UInt8, Nx, Ny, Nz)
+        substrate[:, :, 1:n_sub] .= UInt8(1)
+        phi[:, :, 1:n_sub] .= 0
+    end
+    return (;
+        phi,
+        substrate,
+        dx = dx_m,
+        dy = dy_m,
+        dz = dz_m,
+        origin,
+        substrate_thickness = n_sub * dz_m,
+    )
+end
+
 function write_powder_bed(
     path::AbstractString,
     phi::AbstractArray{<:Real,3},
@@ -293,51 +303,51 @@ function write_powder_bed(
     substrate::Union{Nothing,AbstractArray{UInt8,3}} = nothing,
 )
     phi32 = Float32.(clamp.(phi, 0, 1))
-    h5open(path, "w") do file
+    HDF5.h5open(path, "w") do file
         file["phi"] = phi32
         if substrate !== nothing
             size(substrate) == size(phi32) ||
                 error("substrate size $(size(substrate)) != phi size $(size(phi32))")
             file["substrate"] = substrate
         end
-        attributes(file)["dx"] = Float64(dx)
-        attributes(file)["dy"] = Float64(dy)
-        attributes(file)["dz"] = Float64(dz)
-        attributes(file)["origin"] = Float64[origin...]
-        attributes(file)["index_order"] = "x_fastest"
-        attributes(file)["cell_center"] = "integer"
-        attributes(file)["quantity"] = "metal_volume_fraction"
+        HDF5.attributes(file)["dx"] = Float64(dx)
+        HDF5.attributes(file)["dy"] = Float64(dy)
+        HDF5.attributes(file)["dz"] = Float64(dz)
+        HDF5.attributes(file)["origin"] = Float64[origin...]
+        HDF5.attributes(file)["index_order"] = "x_fastest"
+        HDF5.attributes(file)["cell_center"] = "integer"
+        HDF5.attributes(file)["quantity"] = "metal_volume_fraction"
     end
     return nothing
 end
 
-"""
-    export_powder_hdf5(bed; h5, voxels_per_diameter=6, substrate_thickness=nothing, dx=nothing)
-
-Rasterise the settled spheres to a metal volume fraction and write `h5`.
-The plate, when present, is the `substrate` dataset and is not included in `phi`.
-"""
-function export_powder_hdf5(
-    bed::PowderBed;
-    h5::AbstractString,
-    voxels_per_diameter = 6,
+function hdf5(
+    particles::ParticleArrays,
+    domain::AbstractVector{<:Real};
+    name::AbstractString,
+    voxels_per_diameter::Real = 6,
     substrate_thickness = nothing,
-    dx = nothing,
+    cell_size = nothing,
 )
-    host = cpu_particles(bed.particles)
-    d_med = 2 * median_value(host.radius)
-    thickness = substrate_thickness === nothing ? 3 * d_med : as_si(substrate_thickness, u"m")
+    n = length(particles)
+    n > 0 || throw(ArgumentError("particles must not be empty"))
+    radius = Array(particles.radius)
+    d_med = 2 * Float64(median(radius))
+    thickness = substrate_thickness === nothing ? 3 * d_med :
+        Float64(as_si(substrate_thickness, u"m"))
+
     grid = metal_fraction_grid(
-        bed.particles, bed.domain;
-        voxels_per_diameter, substrate_thickness = thickness, dx,
+        particles, domain;
+        voxels_per_diameter, substrate_thickness = thickness, cell_size,
     )
-    ensure_parent(h5)
+    directory = dirname(name)
+    isempty(directory) || mkpath(directory)
     write_powder_bed(
-        h5, grid.phi, grid.dx, grid.dy, grid.dz, grid.origin;
+        name, grid.phi, grid.dx, grid.dy, grid.dz, grid.origin;
         substrate = grid.substrate,
     )
     return (;
-        h5 = String(h5),
+        name = String(name),
         size = size(grid.phi),
         dx = grid.dx * u"m",
         dy = grid.dy * u"m",

@@ -1,11 +1,3 @@
-"""
-    sample_lognormal_radii(n, d10, d50, d90; dmin, dmax, rng) -> Vector
-
-Draw `n` radii from the lognormal whose median diameter is `d50`. The width is
-the average of the widths implied by `d10` and `d90`. Samples outside
-`[dmin, dmax]` are rejected. Diameters are meters, or lengths such as
-`30u"μm"`. The returned radii are lengths in meters.
-"""
 function sample_lognormal_radii(
     n::Int,
     d10,
@@ -53,28 +45,4 @@ function sample_lognormal_radii(
         end
     end
     return radii .* u"m"
-end
-
-"""
-    suggest_lateral_size(radii, layer_height; packing=0.58) -> L
-
-Square period of a cell whose height `layer_height` would hold `radii` at the
-given solid fraction. The result is never smaller than two largest diameters.
-Lengths may be bare meters or unitful (`120u"μm"`). The result is a length.
-"""
-function suggest_lateral_size(radii, layer_height; packing = 0.58)
-    packing = as_dimensionless(packing)
-    layer_height = as_si(layer_height, u"m")
-    packing > 0 || throw(ArgumentError("packing must be positive"))
-    layer_height > 0 || throw(ArgumentError("layer_height must be positive"))
-    isempty(radii) && throw(ArgumentError("radii must not be empty"))
-    volume = 0.0
-    rmax = 0.0
-    for r in radii
-        rr = as_si(r, u"m")
-        volume += (4 / 3) * π * rr^3
-        rmax = max(rmax, rr)
-    end
-    L = sqrt(volume / (packing * layer_height))
-    return max(L, 4.2 * rmax) * u"m"
 end
