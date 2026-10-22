@@ -227,9 +227,8 @@ end
 function metal_fraction_grid(
     particles::ParticleArrays,
     domain::AbstractVector{<:Real};
-    voxels_per_diameter::Real = 6,
     substrate_thickness = 0,
-    cell_size = nothing,
+    cell_size,
 )
     length(domain) == 3 || throw(ArgumentError("domain must have three components"))
     n = length(particles)
@@ -243,11 +242,7 @@ function metal_fraction_grid(
     (Lx > 0 && Ly > 0 && Lz > 0) ||
         throw(ArgumentError("domain sides must be positive"))
 
-    vpd = Float64(voxels_per_diameter)
-    vpd >= 2 || throw(ArgumentError("voxels_per_diameter must be at least 2"))
-    d_med = 2 * Float64(median(radius))
-    target = cell_size === nothing ? d_med / vpd :
-        Float64(as_si(cell_size, u"m"))
+    target = Float64(as_si(cell_size, u"m"))
     target > 0 || throw(ArgumentError("cell_size must be positive"))
 
     thickness = substrate_thickness === nothing ? 0.0 :
@@ -325,20 +320,17 @@ function hdf5(
     particles::ParticleArrays,
     domain::AbstractVector{<:Real};
     name::AbstractString,
-    voxels_per_diameter::Real = 6,
     substrate_thickness = nothing,
-    cell_size = nothing,
+    cell_size,
 )
     n = length(particles)
     n > 0 || throw(ArgumentError("particles must not be empty"))
-    radius = Array(particles.radius)
-    d_med = 2 * Float64(median(radius))
-    thickness = substrate_thickness === nothing ? 3 * d_med :
+    thickness = substrate_thickness === nothing ? 0.0 :
         Float64(as_si(substrate_thickness, u"m"))
 
     grid = metal_fraction_grid(
         particles, domain;
-        voxels_per_diameter, substrate_thickness = thickness, cell_size,
+        substrate_thickness = thickness, cell_size,
     )
     directory = dirname(name)
     isempty(directory) || mkpath(directory)

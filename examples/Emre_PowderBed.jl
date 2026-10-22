@@ -15,7 +15,8 @@ outdir = joinpath(
     "Emre_PowderBed_" * timestamp)
 mkpath(outdir)
 
-Lx = Ly = 2.0u"mm"
+Lx = 1.0u"mm"
+Ly = 0.25u"mm"
 Lz = 0.5u"mm"
 domain = SVector(
     ustrip(u"m", Lx),
@@ -28,9 +29,11 @@ d50 = sqrt(d10 * d90)
 dmin = 10u"μm"
 dmax = 40u"μm"
 layer_height = 2*d50
+cell_size = 2.5u"µm"
+substrate_thickness = 50.0u"µm"
+n_steps = 3_000_000
 
-n_particles = 30_000
-
+n_particles = 2_000
 radii = sample_lognormal_radii(n_particles, d10, d50, d90; dmin, dmax, rng=Xoshiro(1))
 
 n_particles = estimate_n_particles(
@@ -39,7 +42,6 @@ n_particles = estimate_n_particles(
     layer_height;
     packing = 0.58,
 )
-
 radii = sample_lognormal_radii(n_particles, d10, d50, d90; dmin, dmax, rng=Xoshiro(1))
 
 CairoMakie.activate!()
@@ -57,12 +59,12 @@ result = mp4(
     name = joinpath(outdir, "emre.mp4"),
     frame_every = 500,
     fps = 24,
-    n_steps = 3_000_000,
-    #min_speed = 1e-2,
+    n_steps = n_steps,
+    min_speed = 1e-2,
     check_every = 1_000,
     min_speed_checks = 10,
-    min_steps = 5_000,
-    initial_height = 250u"µm",
+    min_steps = 100_000,
+    initial_height = Lz / 2,
     backend = CUDABackend(),
 )
 particles = result.particles
@@ -87,18 +89,25 @@ hdf5_result = hdf5(
     particles, 
     domain; 
     name = joinpath(outdir, "emre.h5"),
-    cell_size = 5u"µm"
+    substrate_thickness = substrate_thickness,
+    cell_size = cell_size
 )
-
-@show hdf5_result.dx
-@show hdf5_result.dy
-@show hdf5_result.dz
 
 stl(
     particles,
     domain;
     name = joinpath(outdir, "emre.stl"),
-    cell_size = 5u"µm"
+    substrate_thickness = substrate_thickness,
+    cell_size = cell_size,
+)
+
+summary(
+    particles,
+    domain;
+    name = joinpath(outdir, "emre.txt"),
+    layer_height = layer_height,
+    substrate_thickness = substrate_thickness,
+    cell_size = cell_size,
 )
 
 x = Array(particles.x)

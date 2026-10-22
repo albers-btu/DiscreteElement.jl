@@ -282,8 +282,7 @@ function stl(
     particles::ParticleArrays,
     domain::AbstractVector{<:Real};
     name::AbstractString,
-    cell_size = nothing,
-    voxels_per_diameter::Real = 6,
+    cell_size,
     substrate_thickness = nothing,
 )
     length(domain) == 3 ||
@@ -300,18 +299,10 @@ function stl(
     (Lx > 0 && Ly > 0 && Lz > 0) ||
         throw(ArgumentError("domain sides must be positive"))
 
-    d_med = 2 * Float64(median(radius))
-    if cell_size === nothing
-        vpd = Float64(voxels_per_diameter)
-        vpd >= 2 ||
-            throw(ArgumentError("voxels_per_diameter must be at least 2"))
-        cell = d_med / vpd
-    else
-        cell = Float64(as_si(cell_size, u"m"))
-    end
+    cell = Float64(as_si(cell_size, u"m"))
     cell > 0 || throw(ArgumentError("cell_size must be positive"))
 
-    thickness = substrate_thickness === nothing ? 3 * d_med :
+    thickness = substrate_thickness === nothing ? 0.0 :
         Float64(as_si(substrate_thickness, u"m"))
     thickness >= 0 ||
         throw(ArgumentError("substrate_thickness must be non-negative"))

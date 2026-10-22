@@ -7,11 +7,12 @@ using KernelAbstractions: @Const, @index, @kernel, CPU, allocate, get_backend, s
 using Printf
 using Random
 using StaticArrays
-using Statistics: quantile, median
+using Statistics: quantile
 using Unitful
 using CUDA
 import HDF5
 using Unitful
+using Dates
 import Meshing
 
 
@@ -33,6 +34,7 @@ include("simulate.jl")
 include("export/hdf5.jl")
 include("export/stl.jl")
 include("export/mp4.jl")
+include("export/summary.jl")
 include("misc.jl")
 
 export LinearSpringDashpot
@@ -42,7 +44,7 @@ export Force, compute_forces!
 export half_kick!, kick_drift!, keep_in_box!, maximum_speed
 export CellGrid
 export simulate_n_particles
-export hdf5, stl, mp4
+export hdf5, stl, mp4, summary
 export cut_powder_layer, estimate_n_particles
 
 end
