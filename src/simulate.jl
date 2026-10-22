@@ -3,12 +3,12 @@ function simulate_n_particles(
     radii_input::AbstractVector,
     domain::SVector{3,T};
     model::LinearSpringDashpot{T} = LinearSpringDashpot(
-        T(0.5), T(0.5);
+        T(1e3), T(0.5);
         mu = T(0.3), mu_roll = T(0.05), zeta_roll = T(0.3),
     ),
     dt::Union{Nothing,Real} = nothing,
     n_steps::Int = 80_000,
-    density = 7890.0,
+    density = 7980.0,
     gravity::SVector{3,T} = SVector{3,T}(0, 0, -T(9.81)),
     initial_height = nothing,
     seed_volume_fraction::Real = 0.5,

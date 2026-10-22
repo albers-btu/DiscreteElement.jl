@@ -54,14 +54,15 @@ save(joinpath(outdir, "powder_distribution.png"), fig_hist)
 result = mp4(
     Float32.(ustrip.(u"m", radii)),
     Float32.(domain); 
-    name = joinpath(outdir, "prathmesh.mp4"),
+    name = joinpath(outdir, "emre.mp4"),
     frame_every = 500,
     fps = 24,
-    n_steps = 80_000,
-    min_speed = 1e-2,
+    n_steps = 3_000_000,
+    #min_speed = 1e-2,
     check_every = 1_000,
     min_speed_checks = 10,
     min_steps = 5_000,
+    initial_height = 250u"µm",
     backend = CUDABackend(),
 )
 particles = result.particles

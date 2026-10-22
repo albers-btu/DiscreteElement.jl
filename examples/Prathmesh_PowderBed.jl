@@ -67,6 +67,7 @@ result = mp4(
     check_every = 1_000,
     min_speed_checks = 10,
     min_steps = 5_000,
+    initial_height = 250u"µm",
     backend = CUDABackend(),
 )
 particles = result.particles

@@ -1,25 +1,6 @@
 import GLMakie
 import GeometryBasics as GB
 
-"""
-    mp4(radii, domain; name, frame_every=500, fps=24,
-        size=(800, 600), sphere_quality=6, kwargs...)
-
-Run `simulate_n_particles` and write the falling-powder trajectory to MP4.
-All remaining keyword arguments are forwarded to `simulate_n_particles`.
-
-`frame_every` is in simulation steps. Increase it for a faster, smaller video.
-For example, 80_000 steps with `frame_every=500` produces about 160 frames.
-
-The particles are drawn with GLMakie as true 3D spheres with their actual
-radii. Rendering happens in a hidden OpenGL window, so this is much faster than
-the CairoMakie software renderer. A working OpenGL context is required; on a
-headless machine, run under `xvfb-run`.
-
-`sphere_quality` controls the tessellation of the sphere marker: `6` is a good
-default, `4` is faster but visibly faceted. For large videos, raising
-`frame_every` is usually more effective than lowering `sphere_quality`.
-"""
 function mp4(
     radii_input::AbstractVector,
     domain::SVector{3,T};
